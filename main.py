@@ -4,19 +4,21 @@ import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-# --- Env ---
+# ------- Env -------
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     raise RuntimeError("Set OPENAI_API_KEY in Render environment variables")
 
 DEFAULT_VOICE = os.getenv("REALTIME_VOICE", "alloy")  # optional
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*")   # e.g. "https://your.app,https://other.app"
+origins = [o.strip() for o in ALLOWED_ORIGINS.split(",") if o.strip()]
 
-# --- App ---
+# ------- App -------
 app = FastAPI(title="Mia Realtime Token Service")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],      # در تولید محدودش کن
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -30,7 +32,9 @@ def health():
 async def create_ephemeral_session():
     """
     Create ephemeral client secret for OpenAI Realtime (WebRTC).
-    NOTE: Do NOT send 'model' here. Model is set when posting SDP (?model=...).
+    NOTE:
+      - Do NOT send 'model' here. Model is set when posting SDP (?model=...).
+      - 'expires_after.anchor' is required by the API.
     """
     url = "https://api.openai.com/v1/realtime/client_secrets"
     headers = {
@@ -38,7 +42,8 @@ async def create_ephemeral_session():
         "Content-Type": "application/json",
     }
     body = {
-        "expires_after": {"seconds": 60},
+        # Required by API: anchor + seconds
+        "expires_after": {"anchor": "now", "seconds": 60},
         "session": {
             "type": "realtime",
             "voice": DEFAULT_VOICE,
@@ -46,21 +51,28 @@ async def create_ephemeral_session():
                 "You are Mia, a concise, helpful voice assistant. "
                 "Respond in the user's language."
             ),
-            # اختیاری‌ها:
+            # Optional examples:
             # "turn_detection": {"type": "server_vad"},
             # "modalities": ["text", "audio"],
         },
     }
 
     async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.post(url, headers=headers, json=body)
+        resp = await client.post(url, headers=headers, json=body)
 
-    if r.status_code >= 400:
-        # خطای OpenAI را شفاف پاس بده به کلاینت
+    if resp.status_code >= 400:
+        # pass OpenAI error transparently
         try:
-            detail = r.json()
+            detail = resp.json()
         except Exception:
-            detail = {"error": r.text}
+            detail = {"error": resp.text}
         raise HTTPException(status_code=500, detail=detail)
 
-    return r.json()
+    return resp.json()
+
+
+# Local run (use Render start command in production):
+# uvicorn main:app --host 0.0.0.0 --port $PORT
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
