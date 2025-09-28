@@ -1,4 +1,3 @@
-# main.py
 import os, json
 import httpx
 from fastapi import FastAPI, HTTPException
@@ -9,9 +8,9 @@ if not OPENAI_API_KEY:
     raise RuntimeError("Set OPENAI_API_KEY in Render environment variables")
 
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*")
-origins = [o.strip() for o in ALLOWED_ORIGINS.split(",") if o.strip()] or ["*"]
+origins = [o.strip() for o in ALLOWED_ORIGINS.split(",") if o.strip()]
 
-app = FastAPI(title="Mia Realtime Token Service")
+app = FastAPI(title="Realtime Client Secret Service")
 
 app.add_middleware(
     CORSMiddleware,
@@ -26,9 +25,9 @@ def health():
     return {"status": "ok"}
 
 @app.post("/session")
-async def create_ephemeral_session():
+async def create_ephemeral_client_secret():
     """
-    فقط یک client_secret موقت می‌گیریم. هیچ پارامتر مدل/ویس/سشن اینجا نفرست.
+    فقط client_secret می‌گیرد؛ مدل/ویس را اینجا نفرست.
     """
     url = "https://api.openai.com/v1/realtime/client_secrets"
     headers = {
@@ -37,24 +36,29 @@ async def create_ephemeral_session():
         "OpenAI-Beta": "realtime=v1",
     }
     body = {
-        "expires_after": {"anchor": "created_at", "seconds": 60}
+        "expires_after": {  # 60 ثانیه کافی است
+            "anchor": "created_at",  # یا "now" هم اوکی است
+            "seconds": 60
+        }
     }
 
-    async with httpx.AsyncClient(timeout=15) as client:
+    print(">>> BODY SENT TO OPENAI:", json.dumps(body))
+    async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.post(url, headers=headers, json=body)
 
-    # خروجی را شفاف پاس بدهیم یا خطا را برگردانیم
-    try:
-        data = resp.json()
-    except Exception:
-        data = {"raw": resp.text}
-
+    # اگر خطا شد، همون خطای OpenAI رو پاس بده بیرون برای دیباگ
     if resp.status_code >= 400:
-        raise HTTPException(status_code=500, detail=data)
+        try:
+            detail = resp.json()
+        except Exception:
+            detail = {"raw": resp.text}
+        print("<<< OPENAI ERROR:", json.dumps(detail))
+        raise HTTPException(status_code=resp.status_code, detail=detail)
 
+    data = resp.json()
+    print("<<< OK client_secret issued")
     return data
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.environ.get("PORT", "8000"))
-    uvicorn.run("main:app", host="0.0.0.0", port=port)
+    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
