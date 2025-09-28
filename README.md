@@ -1,14 +1,18 @@
-# Mia Realtime Token Service (Render)
+# Realtime Token Service (Render)
 
-## Env Vars (Render)
-- OPENAI_API_KEY = sk-...                # کلید OpenAI
-- REALTIME_VOICE = alloy                 # اختیاری
+## متغیرهای محیطی (Render → Environment)
+- `OPENAI_API_KEY`  (اجباری)
+- `REALTIME_MODEL`  (اختیاری، پیش‌فرض: gpt-4o-realtime-preview-2024-12-17)
+- `REALTIME_VOICE`  (اختیاری، پیش‌فرض: alloy)
+- `ALLOWED_ORIGINS` (اختیاری، مثلا: https://your-frontend.com, http://localhost:5173)
 
 ## Start Command (Render)
 uvicorn main:app --host 0.0.0.0 --port $PORT
 
-## Test
-curl -X POST https://voice-agent-backend-tn1g.onrender.com
+## تست
+```bash
+curl -s https://<your-render-app>.onrender.com/
+# => {"status":"ok"}
 
-# باید JSON برگرداند که شامل client_secret.value باشد.
-
+curl -s -X POST https://<your-render-app>.onrender.com/session | jq
+# باید یک آبجکت شامل client_secret برگرداند.
