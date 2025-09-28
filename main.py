@@ -35,7 +35,7 @@ async def websocket_endpoint(websocket: WebSocket):
             # فعلا برای سادگی، فرض می‌کنیم بعد از دریافت یک حجم مشخصی از داده،
             # صحبت کاربر تمام شده و باید پردازش رو شروع کنیم.
             # برای مثال، بعد از دریافت حدود 500 کیلوبایت داده (چند ثانیه صحبت).
-            if audio_stream.tell() > 500 * 1024:
+            if audio_stream.tell() > 150 * 1024: # حدودا معادل ۴-۵ ثانیه صحبت
                 print("Sufficient audio received, starting AI processing...")
                 
                 # به فلاتر میگیم که در حال پردازش هستیم
