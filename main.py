@@ -2,11 +2,10 @@
 import os
 import json
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
-
-# ---- Env & defaults ---------------------------------------------------------
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     raise RuntimeError("Set OPENAI_API_KEY in Render environment variables")
@@ -17,9 +16,7 @@ REALTIME_VOICE = os.getenv("REALTIME_VOICE", "alloy")
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*")
 origins = [o.strip() for o in ALLOWED_ORIGINS.split(",") if o.strip()]
 
-# ---- FastAPI app ------------------------------------------------------------
 app = FastAPI(title="Mia Realtime Token Service")
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -28,58 +25,50 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-# ---- Health -----------------------------------------------------------------
 @app.get("/")
 def health():
     return {"status": "ok"}
 
-
-# ---- Realtime client_secret (WebRTC) ----------------------------------------
 @app.post("/session")
 async def create_ephemeral_session():
     """
     Create OpenAI Realtime client_secret for WebRTC.
-    IMPORTANT: Fields MUST be top-level (no 'session' object).
+    NOTE: fields must be TOP-LEVEL (no 'session' object).
     """
     url = "https://api.openai.com/v1/realtime/client_secrets"
     headers = {
         "Authorization": f"Bearer {OPENAI_API_KEY}",
         "Content-Type": "application/json",
     }
-
-    # Keep body minimal & valid for the endpoint
     body = {
         "model": REALTIME_MODEL,
         "voice": REALTIME_VOICE,
-        "expires_after": 60  # seconds
-        # اگر لازم شد می‌تونی بعداً اینا رو اضافه کنی:
-        # "modalities": ["text", "audio"],
-        # "audio_format": "wav",
-        # توجه: خیلی از گزینه‌ها در client_secrets مجاز نیستند؛
-        # اگر خطا گرفتی، حداقلِ لازم (model/voice/expires_after) را نگه دار.
+        "expires_after": 60
     }
 
-    print(">>> POST /client_secrets body:", json.dumps(body))
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(url, headers=headers, json=body)
 
-    async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.post(url, headers=headers, json=body)
+        ct = r.headers.get("content-type", "")
+        # موفق
+        if r.status_code < 400:
+            # اگر JSON بود همون رو پاس بده
+            if "application/json" in ct:
+                return JSONResponse(r.json(), status_code=r.status_code)
+            # در غیر این صورت به شکل متن خام ولی داخل JSON
+            return JSONResponse({"raw": r.text}, status_code=r.status_code)
 
-    if resp.status_code >= 400:
-        # Log error details from OpenAI
+        # خطا از OpenAI
         try:
-            detail = resp.json()
+            err = r.json()
         except Exception:
-            detail = {"raw": resp.text}
-        print("<<< OpenAI error:", json.dumps(detail))
-        raise HTTPException(status_code=500, detail=detail)
+            err = {"raw": r.text}
+        return JSONResponse({"detail": err}, status_code=502)
 
-    data = resp.json()
-    print("<<< OK: client_secret issued")
-    return data
+    except Exception as e:
+        return JSONResponse({"detail": {"error": str(e)}}, status_code=500)
 
-
-# ---- Local run (Render sets PORT) -------------------------------------------
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", "8000"))
