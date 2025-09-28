@@ -2,39 +2,28 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from openai import AsyncOpenAI
 import os
 import io
-import wave # <--- کتابخانه استاندارد پایتون برای کار با فایل‌های WAV
+import wave
+import traceback # برای چاپ خطاهای دقیق‌تر
 
-# --- کلاینت OpenAI ---
 client = AsyncOpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
 app = FastAPI()
 
-
-# === تابع کمکی برای اضافه کردن هدر WAV ===
 def add_wav_header(pcm_data: bytes) -> bytes:
-    """اطلاعات هدر یک فایل WAV را به داده‌های خام PCM اضافه می‌کند."""
-    
-    # مشخصات صدای ضبط شده در فلاتر
-    sample_rate = 16000  # 16kHz
-    bits_per_sample = 16 # 16-bit
-    num_channels = 1     # Mono
-
-    # ایجاد یک فایل WAV در حافظه
+    sample_rate = 16000
+    bits_per_sample = 16
+    num_channels = 1
     with io.BytesIO() as wav_file:
         with wave.open(wav_file, 'wb') as wf:
             wf.setnchannels(num_channels)
             wf.setsampwidth(bits_per_sample // 8)
             wf.setframerate(sample_rate)
             wf.writeframes(pcm_data)
-        
-        # برگرداندن کل محتوای فایل (هدر + داده‌ها)
         return wav_file.getvalue()
-
 
 @app.get("/")
 def read_root():
     return {"Status": "OK"}
-
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -48,21 +37,18 @@ async def websocket_endpoint(websocket: WebSocket):
             bytes_data = await websocket.receive_bytes()
             audio_stream.write(bytes_data)
 
-            if audio_stream.tell() > 150 * 1024:
+            # آستانه رو کمی کمتر می‌کنیم تا سریع‌تر جواب بده
+            if audio_stream.tell() > 120 * 1024: 
                 print("Sufficient audio received, starting AI processing...")
-                await websocket.send_text("Processing your request...")
+                
+                # ===> تغییر ۱: به فلاتر خبر میدیم کار سنگین شروع شد <===
+                await websocket.send_text("Transcribing...")
 
-                # --- 1. تبدیل صدا به متن (با هدر WAV) ---
                 pcm_data = audio_stream.getvalue()
-                
-                # ===> تغییر کلیدی اینجاست <===
                 wav_data = add_wav_header(pcm_data)
-                
-                # فایل WAV ساخته شده در حافظه رو به OpenAI میفرستیم
                 wav_stream = io.BytesIO(wav_data)
-                wav_stream.name = "input.wav" # اسم فایل هنوز لازمه
+                wav_stream.name = "input.wav"
                 
-                print("Transcribing audio...")
                 transcript = await client.audio.transcriptions.create(
                     model="whisper-1",
                     file=wav_stream,
@@ -71,9 +57,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 print(f"User said: {user_text}")
                 await websocket.send_text(f"You said: {user_text}")
 
-
-                # --- 2. گرفتن جواب از GPT-4o ---
-                print("Getting response from GPT-4o...")
+                # ===> تغییر ۲: به فلاتر خبر میدیم داریم فکر می‌کنیم <===
+                await websocket.send_text("Thinking...")
                 chat_response = await client.chat.completions.create(
                     model="gpt-4o",
                     messages=[
@@ -84,9 +69,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 ai_text_response = chat_response.choices[0].message.content
                 print(f"AI response: {ai_text_response}")
 
-                
-                # --- 3. تبدیل متن جواب به صدا (TTS) ---
-                print("Generating speech response...")
+                # ===> تغییر ۳: به فلاتر خبر میدیم داریم صدا میسازیم (مهمترین قسمت) <===
+                await websocket.send_text("Generating speech...")
                 speech_response = await client.audio.speech.create(
                     model="tts-1",
                     voice="nova",
@@ -103,9 +87,10 @@ async def websocket_endpoint(websocket: WebSocket):
                 print("Processing finished. Waiting for next audio chunk...")
                 await websocket.send_text("Listening...")
 
-
     except WebSocketDisconnect:
         print("Client disconnected.")
     except Exception as e:
-        print(f"An error occurred: {e}")
+        print("An error occurred:")
+        # چاپ کامل خطا برای دیباگ بهتر
+        traceback.print_exc()
         await websocket.send_text(f"An error occurred on the server: {e}")
