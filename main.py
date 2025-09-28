@@ -1,18 +1,22 @@
-# app.py (Render)
-import os, httpx
+# main.py
+import os
+import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
+# --- Env ---
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
-    raise RuntimeError("Set OPENAI_API_KEY")
+    raise RuntimeError("Set OPENAI_API_KEY in Render environment variables")
 
-DEFAULT_VOICE = os.getenv("REALTIME_VOICE", "alloy")
+DEFAULT_VOICE = os.getenv("REALTIME_VOICE", "alloy")  # optional
 
-app = FastAPI()
+# --- App ---
+app = FastAPI(title="Mia Realtime Token Service")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # در محصولی محدودش کن
+    allow_origins=["*"],      # در تولید محدودش کن
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -25,8 +29,8 @@ def health():
 @app.post("/session")
 async def create_ephemeral_session():
     """
-    Create ephemeral client secret for WebRTC Realtime.
-    NOTE: Do NOT send 'model' here. Model is set on the SDP POST (?model=...).
+    Create ephemeral client secret for OpenAI Realtime (WebRTC).
+    NOTE: Do NOT send 'model' here. Model is set when posting SDP (?model=...).
     """
     url = "https://api.openai.com/v1/realtime/client_secrets"
     headers = {
@@ -34,18 +38,17 @@ async def create_ephemeral_session():
         "Content-Type": "application/json",
     }
     body = {
-        # "model": "gpt-4o-realtime-preview",  # ❌ نذار
         "expires_after": {"seconds": 60},
-        "session": {                     # ✅ همه تنظیمات زیر session
+        "session": {
             "type": "realtime",
             "voice": DEFAULT_VOICE,
             "instructions": (
                 "You are Mia, a concise, helpful voice assistant. "
                 "Respond in the user's language."
             ),
-            
-             "modalities": ["text","audio"],
-            "turn_detection": {"type": "server_vad"},
+            # اختیاری‌ها:
+            # "turn_detection": {"type": "server_vad"},
+            # "modalities": ["text", "audio"],
         },
     }
 
@@ -53,7 +56,11 @@ async def create_ephemeral_session():
         r = await client.post(url, headers=headers, json=body)
 
     if r.status_code >= 400:
-        # پاسخ خطا را شفاف پاس بده به کلاینت
-        raise HTTPException(status_code=500, detail=r.json())
+        # خطای OpenAI را شفاف پاس بده به کلاینت
+        try:
+            detail = r.json()
+        except Exception:
+            detail = {"error": r.text}
+        raise HTTPException(status_code=500, detail=detail)
 
     return r.json()
