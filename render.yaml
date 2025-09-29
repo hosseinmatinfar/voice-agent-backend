@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: voice-agent-backend-tn1g
+    env: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: OPENAI_API_KEY
+        value: sk-xxx  # جايگزين كن با كليد OpenAIت
+      - key: PORT
+        value: 8000
+    regions:
+      - frankfurt
